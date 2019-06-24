@@ -24,7 +24,7 @@ def randDoc(id):
     return post
 
 
-for i in xrange(500000000):
+for i in xrange(58):
     doc = randDoc(i)
     print(json.dumps(doc))
     if i % 1000 == 0:
@@ -33,8 +33,8 @@ for i in xrange(500000000):
 
 #Para pasar a json y poblar la bd
 
-#python m50.py > m50.json
+#python mb100.py > mb100.json
 "siteRootAdmin", "password"
-#mongoimport --db admin --collection datas100 --username siteRootAdmin --password password -v --drop  --file m100.json
-#mongoimport --db system --collection js -v   --file fuzzy.json
+#mongoimport --db admin --collection gb10 --username siteRootAdmin --password password -v --drop  --file
+#mongoimport --db nodo0 --collection mb100 -v   --file mb100.json --port 27018
 #db.mycoll.stats()
