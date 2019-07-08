@@ -4,10 +4,22 @@ import random
 import math
 import functools
 import bisect
-
-from pprint import pprint
-
+from bson import json_util
+import json
 import pymysql
+import datetime
+
+TESTNAME="1";
+EXPERIMENT = 1; # 1-6
+SEED = 1;
+SIZE = 1000;
+FUZZYMIN = 0.25;
+FUZZYMAX = 0.75 ;
+DOMAINMIN = -sys.maxint;
+DOMAINMAX = sys.maxint;
+IMPRECISIONMIN = 0;
+IMPRECISIONMAX = DOMAINMAX/1000 ;
+NODES=5; #4+router+config
 
 # Abre conexion con la base de datos
 db = pymysql.connect("35.233.40.167","root","a1rpagz2","experimental")
@@ -16,44 +28,44 @@ db = pymysql.connect("35.233.40.167","root","a1rpagz2","experimental")
 cursor = db.cursor()
 
 
-
-sql = "INSERT INTO Experiment (name)" \
-      " VALUES (%s)"
-val = () # TODO: Rellenar
-cursor.execute(sql, val)
-
-db.commit()
-
-
-ql = "INSERT INTO Enviroment (nodesNum, machineTyp, cpuNum, diskTyp, zone )" \
+#debería controlar la memoria??? 512
+#cpuNum mejor a double si no recordar que está en porcentaje
+#zone debería ser un TEXT
+sql = "INSERT INTO Environment (nodesNum, machineType, cpuNum, diskType, zone)" \
       " VALUES (%s, %s, %s, %s, %s)"
-val = () # TODO: Rellenar
+val = (NODES,"n1-standard-2",25,"SSD","eu-west1-b")
 cursor.execute(sql, val)
-
 db.commit()
 
-sql = "INSERT INTO Database (seed, size, widthMin, widthMax, tiltMin, tiltMax, domainMin, domainMax)" \
-      " VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"
-val = () # TODO: Rellenar
+idEnv=db.insert_id()
+print idEnv
+
+
+sql = "INSERT INTO Database (seed, size, fuzzyficationMin, fuzzyficationMax, imprecisionMin, imprecisionMax, domainMin, domainMax)" \
+      " VALUES (%s,%s,%s , %s, %s, %s, %s, %s)"
+val = (SEED,SIZE,FUZZYMIN,FUZZYMAX,IMPRECISIONMIN,IMPRECISIONMAX,DOMAINMIN,DOMAINMAX)
 cursor.execute(sql, val)
-
 db.commit()
+idDab=db.insert_id()
+print idDab
 
 
-sql = "INSERT INTO Query (type, time, timelast, resultNum, seed, numQueries)" \
+sql = "INSERT INTO Query (type, time, timelast, resultsNum, seed, numQueries)" \
       " VALUES (%s, %s, %s, %s, %s, %s)"
-val = () # TODO: Rellenar
+val = ("FEQ",datetime.datetime.now(),datetime.datetime.now(),0,SEED,1)
 cursor.execute(sql, val)
-
 db.commit()
+idQue=db.insert_id()
+print idQue
 
 
-print(cursor.rowcount, "record inserted.")
-
-
-
-
-
+sql = "INSERT INTO Test (name, createdAt, updatedAt, idExperiment, idEnvironment, idDatabase, idQuery)" \
+      " VALUES (%s, %s, %s, %s, %s, %s, %s)"
+val = (TESTNAME,datetime.datetime.now(),datetime.datetime.now(),EXPERIMENT,idEnv,idDab,idQue)
+cursor.execute(sql, val)
+db.commit()
+idTest=db.insert_id()
+print idTest
 
 
 client = MongoClient("mongodb://main_admin:abc123@localhost:27017")
@@ -61,10 +73,10 @@ client = MongoClient("mongodb://main_admin:abc123@localhost:27017")
 mydb = client["mydatabase"]
 client.admin.command('enableSharding', 'mydatabase')
 #NO PARA STANDALONE
-mycol = mydb["prueba"]
+mycol = mydb["mytest"]
 
 
-random.seed(1)
+random.seed(SEED)
 
 class ZipfGenerator:
 
@@ -84,21 +96,21 @@ class ZipfGenerator:
         return bisect.bisect(self.distMap, u) - 1
 
 
-zipf = ZipfGenerator(10000, 1)
+zipf = ZipfGenerator(SIZE, 1) #10000???
 
 
 def randomTrap():
     # Point is the geometric center of trapezoid
 
-    point = random.uniform(-sys.maxint, sys.maxint)
+    point = random.uniform(DOMAINMIN, DOMAINMAX)
 
     # Width of trapezoid (using zipf distribution)
 
-    width = zipf.next() * random.uniform(0, sys.maxint / 1000)
+    width = zipf.next() * random.uniform(IMPRECISIONMIN, IMPRECISIONMAX)
 
     # Adapt tilt if we want an angle more opened or not
 
-    tilt = random.uniform(0.25, 0.75)
+    tilt = random.uniform(FUZZYMIN, FUZZYMAX)
 
     # Creating trapezoid a,b,c,d
 
@@ -127,15 +139,43 @@ def randDoc(id):
     x = randomTrap()
     post = {"_id": id, "x": x}
     post["x"]
-
     return post
 
 
-for i in xrange(1000):
+for i in xrange(SIZE):
     mydict = randDoc(i)
     n = mycol.insert_one(mydict)
 
-    #print(n.inserted_id)
+timesql= datetime.date.now()
 
-    # desconecta del servidor SQL
-    # db.close()
+myquery = {"$where:'feq(this.x,[]) >=0.5'"}
+mydoc = mycol.find(myquery).explain("executionStats")
+
+sql = "UPDATE Query SET time = %s WHERE id = %s"
+val = (timesql, idQue)
+cursor.execute(sql, val)
+mydb.commit()
+
+sql = "UPDATE Query SET timelast = %s WHERE id = %s"
+val = (datetime.date.now(), idQue)
+cursor.execute(sql, val)
+mydb.commit()
+
+sql = "UPDATE Test SET updatedAt = %s WHERE id = %s"
+val = (datetime.date.now(), idTest)
+cursor.execute(sql, val)
+mydb.commit()
+
+
+#Get the file name for the new file to write
+filename = TESTNAME
+
+# If the file name exists, write a JSON string into the file.
+if filename:
+    # Writing JSON data
+    with open(filename, 'w') as f:
+        json_util.dumps(mydoc,f)
+
+
+# desconecta del servidor SQL
+db.close()
