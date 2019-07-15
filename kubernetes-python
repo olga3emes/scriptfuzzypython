@@ -10,44 +10,35 @@ import pymysql
 import datetime
 
 TESTNAME="1";
-EXPERIMENT = 1; # 1-6
+EXPERIMENT = 3; # 1-6
 SEED = 1;
 SIZE = 1000;
 FUZZYMIN = 0.25;
 FUZZYMAX = 0.75 ;
-DOMAINMIN = -sys.maxint;
+DOMAINMIN = sys.maxint;
 DOMAINMAX = sys.maxint;
-IMPRECISIONMIN = 0;
-IMPRECISIONMAX = DOMAINMAX/1000 ;
+IMPRECISIONMIN = 0.0;
+IMPRECISIONMAX = DOMAINMAX/1000;
 NODES=5; #4+router+config
 
 # Abre conexion con la base de datos
 db = pymysql.connect("35.233.40.167","root","a1rpagz2","experimental")
+#db = pymysql.connect("127.0.0.1","root","a1rpagz2","sql-experiments")
 
 # prepare a cursor object using cursor() method
 cursor = db.cursor()
 
 
-#debería controlar la memoria??? 512
-#cpuNum mejor a double si no recordar que está en porcentaje
-#zone debería ser un TEXT
+#deberia controlar la memoria??? 512
+#cpuNum mejor a double si no recordar que esta en porcentaje
+#zone deberia ser un TEXT
 sql = "INSERT INTO Environment (nodesNum, machineType, cpuNum, diskType, zone)" \
       " VALUES (%s, %s, %s, %s, %s)"
 val = (NODES,"n1-standard-2",25,"SSD","eu-west1-b")
 cursor.execute(sql, val)
 db.commit()
-
-idEnv=db.insert_id()
+idEnv=cursor.lastrowid
 print idEnv
-
-
-sql = "INSERT INTO Database (seed, size, fuzzyficationMin, fuzzyficationMax, imprecisionMin, imprecisionMax, domainMin, domainMax)" \
-      " VALUES (%s,%s,%s , %s, %s, %s, %s, %s)"
-val = (SEED,SIZE,FUZZYMIN,FUZZYMAX,IMPRECISIONMIN,IMPRECISIONMAX,DOMAINMIN,DOMAINMAX)
-cursor.execute(sql, val)
-db.commit()
-idDab=db.insert_id()
-print idDab
 
 
 sql = "INSERT INTO Query (type, time, timelast, resultsNum, seed, numQueries)" \
@@ -55,17 +46,29 @@ sql = "INSERT INTO Query (type, time, timelast, resultsNum, seed, numQueries)" \
 val = ("FEQ",datetime.datetime.now(),datetime.datetime.now(),0,SEED,1)
 cursor.execute(sql, val)
 db.commit()
-idQue=db.insert_id()
+idQue=cursor.lastrowid
 print idQue
 
 
-sql = "INSERT INTO Test (name, createdAt, updatedAt, idExperiment, idEnvironment, idDatabase, idQuery)" \
+sql = "INSERT INTO Dbase (seed, size, fuzzyficationMin, fuzzyficationMax, imprecisionMin, imprecisionMax, domainMin, domainMax)" \
+      " VALUES (%s,%s,%s,%s, %s, %s, %s, %s)"
+val = (SEED,SIZE,FUZZYMIN,FUZZYMAX,IMPRECISIONMIN,IMPRECISIONMAX,DOMAINMIN,DOMAINMAX)
+cursor.execute(sql, val)
+db.commit()
+idDab=cursor.lastrowid
+print idDab
+
+
+
+
+sql = "INSERT INTO test (name, createdAt, updatedAt, idExperiment, idEnvironment, idDbase, idQuery)" \
       " VALUES (%s, %s, %s, %s, %s, %s, %s)"
 val = (TESTNAME,datetime.datetime.now(),datetime.datetime.now(),EXPERIMENT,idEnv,idDab,idQue)
 cursor.execute(sql, val)
 db.commit()
-idTest=db.insert_id()
+idTest=cursor.lastrowid
 print idTest
+
 
 
 client = MongoClient("mongodb://main_admin:abc123@localhost:27017")
@@ -102,7 +105,7 @@ zipf = ZipfGenerator(SIZE, 1) #10000???
 def randomTrap():
     # Point is the geometric center of trapezoid
 
-    point = random.uniform(DOMAINMIN, DOMAINMAX)
+    point = random.uniform(-DOMAINMIN, DOMAINMAX)
 
     # Width of trapezoid (using zipf distribution)
 
