@@ -6,20 +6,42 @@ import functools
 import bisect
 from bson import json_util
 import json
+import bson
 import pymysql
 import datetime
 
-TESTNAME="1";
+SEED = sys.argv[1];
+print "Seed: " + SEED
+QUERYSEED = sys.argv[2];
+print "Query-Seed: " + QUERYSEED
+
+
+TESTNAME="Test " + SEED;
 EXPERIMENT = 3; # 1-6
-SEED = 1;
+NODES=5; #4+router+config
+
+#---------------- Database --------------------------
 SIZE = 1000;
+
 FUZZYMIN = 0.25;
 FUZZYMAX = 0.75 ;
 DOMAINMIN = sys.maxint;
 DOMAINMAX = sys.maxint;
 IMPRECISIONMIN = 0.0;
 IMPRECISIONMAX = DOMAINMAX/1000;
-NODES=5; #4+router+config
+
+#---------------- Queries -----------------------------
+NUMQUERIES = 2;
+
+FUZZYMINQ = 0.25;
+FUZZYMAXQ = 0.75 ;
+DOMAINMINQ = sys.maxint;
+DOMAINMAXQ = sys.maxint;
+IMPRECISIONMINQ = 0.0;
+IMPRECISIONMAXQ = DOMAINMAX/1000;
+
+TYPE= "feq";
+SELECTIVITY = '>=0.5';
 
 # Abre conexion con la base de datos
 db = pymysql.connect("35.233.40.167","root","a1rpagz2","experimental")
@@ -29,25 +51,15 @@ db = pymysql.connect("35.233.40.167","root","a1rpagz2","experimental")
 cursor = db.cursor()
 
 
-#deberia controlar la memoria??? 512
-#cpuNum mejor a double si no recordar que esta en porcentaje
-#zone deberia ser un TEXT
-sql = "INSERT INTO Environment (nodesNum, machineType, cpuNum, diskType, zone)" \
-      " VALUES (%s, %s, %s, %s, %s)"
-val = (NODES,"n1-standard-2",25,"SSD","eu-west1-b")
+#memoria GB
+#cpuNum double
+sql = "INSERT INTO Environment (nodesNum, machineType, cpuNum, ramMemory, diskType, zone)" \
+      " VALUES (%s, %s, %s, %s, %s, %s)"
+val = (NODES,"n1-standard-2",0.25,0.5,"SSD","europe-west1-b")
 cursor.execute(sql, val)
 db.commit()
 idEnv=cursor.lastrowid
 print idEnv
-
-
-sql = "INSERT INTO Query (type, time, timelast, resultsNum, seed, numQueries)" \
-      " VALUES (%s, %s, %s, %s, %s, %s)"
-val = ("FEQ",datetime.datetime.now(),datetime.datetime.now(),0,SEED,1)
-cursor.execute(sql, val)
-db.commit()
-idQue=cursor.lastrowid
-print idQue
 
 
 sql = "INSERT INTO Dbase (seed, size, fuzzyficationMin, fuzzyficationMax, imprecisionMin, imprecisionMax, domainMin, domainMax)" \
@@ -59,11 +71,19 @@ idDab=cursor.lastrowid
 print idDab
 
 
+sql = "INSERT INTO QuerySet (type, totalTime, seed, numQueries, selectivity, fuzzyficationMin, fuzzyficationMax, imprecisionMin, imprecisionMax, domainMin, domainMax)" \
+      " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+val = (TYPE,0,0,QUERYSEED,NUMQUERIES,SELECTIVITY,FUZZYMINQ,FUZZYMAXQ,IMPRECISIONMINQ,IMPRECISIONMAXQ,DOMAINMINQ,DOMAINMAXQ)
+cursor.execute(sql, val)
+db.commit()
+idQuerySet=cursor.lastrowid
+print idQuerySet
 
 
-sql = "INSERT INTO test (name, createdAt, updatedAt, idExperiment, idEnvironment, idDbase, idQuery)" \
+
+sql = "INSERT INTO Test (name, createdAt, updatedAt, idExperiment, idEnvironment, idDbase, idQuerySet)" \
       " VALUES (%s, %s, %s, %s, %s, %s, %s)"
-val = (TESTNAME,datetime.datetime.now(),datetime.datetime.now(),EXPERIMENT,idEnv,idDab,idQue)
+val = (TESTNAME,datetime.datetime.now(),datetime.datetime.now(),EXPERIMENT,idEnv,idDab,idQuerySet)
 cursor.execute(sql, val)
 db.commit()
 idTest=cursor.lastrowid
@@ -74,9 +94,11 @@ print idTest
 client = MongoClient("mongodb://main_admin:abc123@localhost:27017")
 
 mydb = client["mydatabase"]
+mycol = mydb["mytest"]
+mycol.delete_many({})
 client.admin.command('enableSharding', 'mydatabase')
 #NO PARA STANDALONE
-mycol = mydb["mytest"]
+
 
 
 random.seed(SEED)
@@ -99,21 +121,21 @@ class ZipfGenerator:
         return bisect.bisect(self.distMap, u) - 1
 
 
-zipf = ZipfGenerator(SIZE, 1) #10000???
+def randomTrap(domainMin, domainMax, imprecisionMin, imprecisionMax, fuzzyMin, fuzzyMax, numTrap):
 
 
-def randomTrap():
+    zipf = ZipfGenerator(numTrap, 1)
     # Point is the geometric center of trapezoid
 
-    point = random.uniform(-DOMAINMIN, DOMAINMAX)
+    point = random.uniform(domainMin,domainMax)
 
     # Width of trapezoid (using zipf distribution)
 
-    width = zipf.next() * random.uniform(IMPRECISIONMIN, IMPRECISIONMAX)
+    width = zipf.next() * random.uniform(imprecisionMin, imprecisionMax)
 
     # Adapt tilt if we want an angle more opened or not
 
-    tilt = random.uniform(FUZZYMIN, FUZZYMAX)
+    tilt = random.uniform(fuzzyMin, fuzzyMax)
 
     # Creating trapezoid a,b,c,d
 
@@ -139,7 +161,7 @@ def randomTrap():
 
 
 def randDoc(id):
-    x = randomTrap()
+    x = randomTrap(-DOMAINMIN,DOMAINMAX,IMPRECISIONMIN,IMPRECISIONMAX,FUZZYMIN,FUZZYMAX,SIZE)
     post = {"_id": id, "x": x}
     post["x"]
     return post
@@ -149,36 +171,50 @@ for i in xrange(SIZE):
     mydict = randDoc(i)
     n = mycol.insert_one(mydict)
 
-timesql= datetime.date.now()
 
-myquery = {"$where:'feq(this.x,[]) >=0.5'"}
-mydoc = mycol.find(myquery).explain("executionStats")
 
-sql = "UPDATE Query SET time = %s WHERE id = %s"
-val = (timesql, idQue)
-cursor.execute(sql, val)
-mydb.commit()
+for i in xrange(NUMQUERIES):
+    sql = "INSERT INTO Query (order, idQuerySet, resultsNum, time)" \
+          " VALUES (%s,%s,%s,%s)"
+    val = (i, idQuerySet, 0, 0)
+    cursor.execute(sql, val)
+    db.commit()
+    idQue = cursor.lastrowid
+    print "id Query:" +idQue
+    random.random(QUERYSEED)
+    y=randomTrap(-DOMAINMINQ,DOMAINMAXQ,IMPRECISIONMINQ,IMPRECISIONMAXQ,FUZZYMINQ,FUZZYMAXQ,NUMQUERIES)
+    myquery = {"$where:'"+TYPE+"(this.x,'"+y+") "+ SELECTIVITY}
+    mydoc = list(mycol.find(myquery))
+    mydoc2= client.admin.command(
+        bson.son.SON([('explain',bson.son.SON([('find', 'mycol'), ('filter', {'$where' : TYPE+'(this.x,'+y+')'+SELECTIVITY})])), ('verbosity', 'executionStats')]))
+    print mydoc
+    print mydoc2
+    print mydoc2.executionTimeMillis
+    timeMillis=mydoc2.exectionTimeMillis
 
-sql = "UPDATE Query SET timelast = %s WHERE id = %s"
-val = (datetime.date.now(), idQue)
-cursor.execute(sql, val)
-mydb.commit()
+    sql = "UPDATE QuerySet SET totalTime += %s WHERE id = %s"
+    val = (timeMillis, idQuerySet)
+    cursor.execute(sql, val)
+    db.commit()
+
+    sql = "UPDATE Query SET resultsNum = %s WHERE id = %s"
+    val = (len(mydoc), idQue)
+    cursor.execute(sql, val)
+    db.commit()
+
+    sql = "UPDATE Query SET time = %s WHERE id = %s"
+    val = (timeMillis, idQue)
+    cursor.execute(sql, val)
+    db.commit()
 
 sql = "UPDATE Test SET updatedAt = %s WHERE id = %s"
-val = (datetime.date.now(), idTest)
+val = (datetime.datetime.now(), idTest)
 cursor.execute(sql, val)
-mydb.commit()
+db.commit()
 
-
-#Get the file name for the new file to write
-filename = TESTNAME
-
-# If the file name exists, write a JSON string into the file.
-if filename:
-    # Writing JSON data
-    with open(filename, 'w') as f:
-        json_util.dumps(mydoc,f)
 
 
 # desconecta del servidor SQL
 db.close()
+#desconecta mongo
+client.close()
