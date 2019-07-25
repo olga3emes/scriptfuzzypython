@@ -41,7 +41,9 @@ IMPRECISIONMINQ = 0.0;
 IMPRECISIONMAXQ = DOMAINMAX/1000;
 
 TYPE= "feq";
-SELECTIVITY = '>=0.5';
+OPERATION='>=';
+REQUIREMENTLEVEL=random.randrange(0,1,0.1)
+
 
 # Abre conexion con la base de datos
 db = pymysql.connect("35.233.40.167","root","a1rpagz2","experimental")
@@ -71,9 +73,9 @@ idDab=cursor.lastrowid
 print idDab
 
 
-sql = "INSERT INTO QuerySet (type, totalTime, seed, numQueries, selectivity, fuzzyficationMin, fuzzyficationMax, imprecisionMin, imprecisionMax, domainMin, domainMax)" \
-      " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
-val = (TYPE,0,0,QUERYSEED,NUMQUERIES,SELECTIVITY,FUZZYMINQ,FUZZYMAXQ,IMPRECISIONMINQ,IMPRECISIONMAXQ,DOMAINMINQ,DOMAINMAXQ)
+sql = "INSERT INTO QuerySet (type, totalTime, seed, numQueries, fuzzyficationMin, fuzzyficationMax, imprecisionMin, imprecisionMax, domainMin, domainMax)" \
+      " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+val = (TYPE,0,0,QUERYSEED,NUMQUERIES,FUZZYMINQ,FUZZYMAXQ,IMPRECISIONMINQ,IMPRECISIONMAXQ,DOMAINMINQ,DOMAINMAXQ)
 cursor.execute(sql, val)
 db.commit()
 idQuerySet=cursor.lastrowid
@@ -174,19 +176,19 @@ for i in xrange(SIZE):
 
 
 for i in xrange(NUMQUERIES):
-    sql = "INSERT INTO Query (order, idQuerySet, resultsNum, time)" \
-          " VALUES (%s,%s,%s,%s)"
-    val = (i, idQuerySet, 0, 0)
+    sql = "INSERT INTO Query (order, idQuerySet, resultsNum, time, operation, requirementLevel)" \
+          " VALUES (%s,%s,%s,%s, %s, %s)"
+    val = (i, idQuerySet, 0, 0, OPERATION, REQUIREMENTLEVEL)
     cursor.execute(sql, val)
     db.commit()
     idQue = cursor.lastrowid
     print "id Query:" +idQue
     random.random(QUERYSEED)
     y=randomTrap(-DOMAINMINQ,DOMAINMAXQ,IMPRECISIONMINQ,IMPRECISIONMAXQ,FUZZYMINQ,FUZZYMAXQ,NUMQUERIES)
-    myquery = {"$where:'"+TYPE+"(this.x,'"+y+") "+ SELECTIVITY}
+    myquery = {"$where:'"+TYPE+"(this.x,'"+y+") "+ OPERATION,REQUIREMENTLEVEL}
     mydoc = list(mycol.find(myquery))
     mydoc2= client.admin.command(
-        bson.son.SON([('explain',bson.son.SON([('find', 'mycol'), ('filter', {'$where' : TYPE+'(this.x,'+y+')'+SELECTIVITY})])), ('verbosity', 'executionStats')]))
+        bson.son.SON([('explain',bson.son.SON([('find', 'mycol'), ('filter', {'$where' : TYPE+'(this.x,'+y+')'+OPERATION+REQUIREMENTLEVEL})])), ('verbosity', 'executionStats')]))
     print mydoc
     print mydoc2
     print mydoc2.executionTimeMillis
