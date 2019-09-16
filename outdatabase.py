@@ -7,6 +7,7 @@ import bisect
 import pymysql
 import datetime
 import commands
+import time
 
 SEED = sys.argv[1];
 print "Seed: " + SEED
@@ -14,13 +15,13 @@ QUERYSEED = sys.argv[2];
 print "Query-Seed: " + QUERYSEED
 
 
-TESTNAME="Test - Infuence of document size - 2MB per doc - 1K docs" + SEED;
-print "Test - Infuence of document size - 2MB per doc - 1K docs"
+TESTNAME="Test - Outdatabase vs Indatabase - 500 docs" + SEED;
+print "Test - Outdatabase vs Indatabase - 500 docs"
 EXPERIMENT = 3; # 1-6
 NODES=5; #4+router+config
 
 #---------------- Database --------------------------
-SIZE = 1000;
+SIZE = 500;#500,1000,2000,5000
 
 FUZZYMIN = 0.25;
 FUZZYMAX = 0.75 ;
@@ -200,21 +201,44 @@ for i in range(1, NUMQUERIES+1):
     fullStr = ','.join([str(elem) for elem in y])
     #"$where:'feq(this.x,[-10000,0,1,10000]) >=0.5'"
     #lista = mycol.find({"$where": 'feq(this.x,['+ fullStr +'])' + OPERATION + str(REQUIREMENTLEVEL)})
-
     mydb.command({"planCacheClear": "mycol"})#cache cleaned
+    #mydoc= mycol.find({"$where": 'feq(this.x,[' + fullStr + '])' + OPERATION + str(REQUIREMENTLEVEL)}).explain()
 
+    millis = int(round(time.time() * 1000))
 
-    mydoc= mycol.find({"$where": 'feq(this.x,[' + fullStr + '])' + OPERATION + str(REQUIREMENTLEVEL)}).explain()
+    mydoc2 = mycol.find({})
+    lista = list()
+    for d in mydoc2:
+        alfaA = d[0]
+        betaA = d[1]
+        gammaA = d[2]
+        deltaA = d[3]
 
-    print mydoc["executionStats"]
-    timeMil= mydoc["executionStats"]["executionTimeMillis"]
-    print timeMil
-    docsExamined=mydoc["executionStats"]["totalDocsExamined"]
-    print docsExamined
-    docs=mydoc["executionStats"]["nReturned"]
-    print docs
+        alfaB = y[0]
+        betaB = y[1]
+        gammaB = y[2]
+        deltaB = y[3]
 
-    totalTime= totalTime+timeMil
+        res=0
+        if (gammaA >= betaB and betaA <= gammaB) :
+            res=1
+
+        if (deltaA <= alfaB or alfaA >= deltaB) :
+            res= 0
+
+        if (deltaA > alfaB and gammaA < betaB) :
+            res= (deltaA - alfaB) / ((betaB - alfaB) - (gammaA - deltaA))
+        else:
+            res= ((deltaB - alfaA) / ((betaA - alfaA) - (gammaB - deltaB)))
+
+        if (res >= REQUIREMENTLEVEL):
+            lista.append(d)
+
+    millis2= int(round(time.time() * 1000))
+
+    querytime=millis2-millis
+
+    totalTime= totalTime + querytime
 
     sql = "UPDATE QuerySet SET totalTime = %s WHERE id = %s"
     val = (totalTime, idQuerySet)
@@ -222,12 +246,12 @@ for i in range(1, NUMQUERIES+1):
     db.commit()
 
     sql = "UPDATE Query SET resultsNum = %s WHERE id = %s"
-    val = (docs, idQue)
+    val = (lista.len(), idQue)
     cursor.execute(sql, val)
     db.commit()
 
     sql = "UPDATE Query SET timeMillis = %s WHERE id = %s"
-    val = (timeMil, idQue)
+    val = (querytime, idQue)
     cursor.execute(sql, val)
     db.commit()
 
